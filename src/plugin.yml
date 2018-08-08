@@ -1,0 +1,10 @@
+name: MachinaRandomTeleport
+main: org.MachinaRandomTeleport.ThePrometeus.Main
+version: 1.0
+softdepend: [Multiverse-Core]
+
+commands:
+    mrtp:
+        usage: /mrtp
+        aliases: [rtp, randomtp, randomteleport]
+        description: MachinaRandomTeleport command
