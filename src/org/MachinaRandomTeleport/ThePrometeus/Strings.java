@@ -8,4 +8,5 @@ public class Strings {
     public static String noWorldChoosen;
     public static String findingLocation;
     public static String tpPermissionDenied;
+    public static String failed;
 }

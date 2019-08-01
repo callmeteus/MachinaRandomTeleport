@@ -21,7 +21,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 public class Main extends JavaPlugin implements Listener {
     private static int cooldown                         = 0;
-    private static HashMap<UUID, Long> cooldowns        = new HashMap<>();
+    private static final HashMap<UUID, Long> cooldowns  = new HashMap<>();
     private static List<String> prohibitedBlocks        = new ArrayList();
     private String defaultWorldName;
     private int maxX;
@@ -80,6 +80,7 @@ public class Main extends JavaPlugin implements Listener {
         getConfig().addDefault("strings.inCooldown", "&4You need to wait %02d seconds to use random teleport again.");
         getConfig().addDefault("strings.success", "&cYou have been random teleported.");
         getConfig().addDefault("strings.noWorldChosen", "&cYou have to specify a world name first.");
+        getConfig().addDefault("strings.failed", "&cFailed to find a proper location to teleport.");
         getConfig().addDefault("strings.findingLocation", "Finding a safe location to teleport...");
         getConfig().addDefault("strings.prefix", "&b&l[MachinaRandomTeleport]");
 
@@ -104,6 +105,7 @@ public class Main extends JavaPlugin implements Listener {
         Strings.noWorldChoosen      = ChatColor.translateAlternateColorCodes('&', Utils.fixAccents(getConfig().getString("strings.noWorldChosen")));
         Strings.findingLocation     = ChatColor.translateAlternateColorCodes('&', Utils.fixAccents(getConfig().getString("strings.findingLocation")));
         Strings.prefix              = ChatColor.translateAlternateColorCodes('&', Utils.fixAccents(getConfig().getString("strings.prefix"))) + ChatColor.RESET + " ";
+        Strings.failed              = ChatColor.translateAlternateColorCodes('&', Utils.fixAccents(getConfig().getString("strings.failed"))) + ChatColor.RESET + " ";
     }
 
     /* -------------------------------------------------------------------------------------------------------------------------- */
@@ -116,7 +118,7 @@ public class Main extends JavaPlugin implements Listener {
     }
 
     private double getRelativeCoord(double d) {
-        d           = d < 0 ? d - .5 : d + .5;
+        d                           = d < 0 ? d - .5 : d + .5;
 
         return d;
     }
@@ -137,8 +139,8 @@ public class Main extends JavaPlugin implements Listener {
         String highestBlockType     = highestBlock.getRelative(BlockFace.DOWN).getType().name();
 
         // Check if the highest block is an invalid block (it's prohibited or it's AIR)
-        if (highestBlock.getType().equals(Material.AIR) || prohibitedBlocks.contains(highestBlockType)) {
-            return findSafeTeleportLocation(world);
+        if (highestBlockType.equals("AIR") || prohibitedBlocks.contains(highestBlockType)) {
+            return null;
         }
 
         // Check for surround blocks
@@ -146,36 +148,47 @@ public class Main extends JavaPlugin implements Listener {
             for(int lx = 0; lx < 2; lx++) {
                 for(int lz = 0; lz < 2; lz++) {
                     // Get positive and negative blocks
-                    Block bp                = world.getBlockAt(highestBlockLoc.add(lx * -1, ly, lz * -1));
-                    Block bn                = world.getBlockAt(highestBlockLoc.add(lx * -1, ly, lz * -1));
+                    Block bp        = world.getBlockAt(highestBlockLoc.add(lx * -1, ly, lz * -1));
+                    Block bn        = world.getBlockAt(highestBlockLoc.add(lx * -1, ly, lz * -1));
 
-                    // Check if the surrounded blocks isn't air
-                    // then start to check again
+                    // Check if the surrounded blocks are AIR
                     if (bp.getType() != Material.AIR || bn.getType() != Material.AIR) {
-                        return findSafeTeleportLocation(world);
+                        return null;
                     }
                 }
             }
         }
 
         // Get the center of the hightest block location
-        teleport                = getCenter(highestBlock.getLocation());
+        teleport                    = getCenter(highestBlock.getLocation());
+        
+        getLogger().info(highestBlockType);
 
         return teleport;
     }
 
-    public void createLocationFinder(final Player p, final String world) {
+    public void createLocationFinder(final Player p, final String world, final int retries) {
+        if (retries >= 200) {
+            p.sendMessage(Strings.prefix + Strings.failed);
+
+            return;
+        }
         // Run the search in a new thread
         getServer().getScheduler().scheduleSyncDelayedTask(this, new Runnable() {
             @Override
             public void run() {
                 Location teleport   = findSafeTeleportLocation(Bukkit.getWorld(world));
                 
-                // Finally teleport player
-                p.teleport(teleport);
+                // Check if a location is found
+                if (teleport != null) {                
+                    // Finally teleport player
+                    p.teleport(teleport);
 
-                // and send "success" message
-                p.sendMessage(Strings.prefix + Strings.success);
+                    // and send "success" message
+                    p.sendMessage(Strings.prefix + Strings.success);
+                } else {
+                    createLocationFinder(p, world, retries + 1);
+                }
             }
         }, 1L);
     }
@@ -184,8 +197,9 @@ public class Main extends JavaPlugin implements Listener {
 
     @Override
     public boolean onCommand(CommandSender s, Command cmd, String label, String[] args) {
-        if (!cmd.getName().equalsIgnoreCase("mrtp"))
+        if (!cmd.getName().equalsIgnoreCase("mrtp")) {
             return false;
+        }
 
         // Check if command sender can reload configuration
         // and then reload the configuration
@@ -203,18 +217,18 @@ public class Main extends JavaPlugin implements Listener {
            return true; 
         }
 
-        Player p                = (Player) s;
-        long now                = System.currentTimeMillis();
+        Player p                    = (Player) s;
+        long now                    = System.currentTimeMillis();
 
         // Check if player has choosen a world, and we have a default world
         if (args.length == 0 && defaultWorldName.isEmpty()) {
             p.sendMessage(Strings.prefix + Strings.noWorldChoosen);
         } else {
-            String worldName    = defaultWorldName;
+            String worldName        = defaultWorldName;
 
             // Check if player specified a world name
             if (args.length > 0)
-                worldName       = args[0];
+                worldName           = args[0];
 
             // Check if player has permission
             if ((!p.hasPermission("mrtp.worlds." + worldName) && needPermission) || Bukkit.getWorld(worldName) == null) {
@@ -222,19 +236,22 @@ public class Main extends JavaPlugin implements Listener {
                 return true;
             }
 
-            UUID playerUID      = p.getUniqueId();
+            UUID playerUID          = p.getUniqueId();
 
             // Check if plugin is configurated
             // to count the player cooldown to
             // teleport again
             if (cooldown > 0) {
                 // Check if player is in cooldown
-                if (cooldowns.containsKey(playerUID))
+                if (cooldowns.containsKey(playerUID)) {
+                    // Check if cooldown expired
                     if (cooldowns.containsKey(playerUID) && cooldowns.get(playerUID) > now) {
                         p.sendMessage(Strings.prefix + String.format(Strings.inCooldown, new Object[]{(cooldowns.get(playerUID) - now) / 1000}));
                         return true;
-                    } else
+                    } else {
                         cooldowns.remove(playerUID);
+                    }
+                }
 
                 // Put player in cooldown
                 cooldowns.put(playerUID, now + (cooldown * 1000));
@@ -244,7 +261,7 @@ public class Main extends JavaPlugin implements Listener {
 
             // Finally create player teleport finder async,
             // this way we don't block Bukkit main thread
-            createLocationFinder(p, worldName);
+            createLocationFinder(p, worldName, 0);
         }
 
         return true;
