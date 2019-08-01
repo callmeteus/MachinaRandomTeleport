@@ -43,7 +43,6 @@ public class Main extends JavaPlugin implements Listener {
         }
 
         getLogger().info("Listeners registered.");
-
         
         // Set some default prohibited blocks
         prohibitedBlocks.add("LAVA");
@@ -85,7 +84,6 @@ public class Main extends JavaPlugin implements Listener {
         getConfig().addDefault("strings.prefix", "&b&l[MachinaRandomTeleport]");
 
         getConfig().options().copyDefaults(true);
-        saveConfig();
     }
 
     public void ReadConfig() {
@@ -96,7 +94,7 @@ public class Main extends JavaPlugin implements Listener {
         defaultWorldName            = getConfig().getString("teleport.defaultWorld");
         maxX                        = getConfig().getInt("teleport.maxX");
         maxZ                        = getConfig().getInt("teleport.maxZ");
-        prohibitedBlocks            = (List<String>) getConfig().getList("teleport.prohibitedBlocks");
+        prohibitedBlocks            = getConfig().getStringList("teleport.prohibitedBlocks");
         needPermission              = getConfig().getBoolean("teleport.needPermission");
 
         Strings.permissionDenied    = ChatColor.translateAlternateColorCodes('&', Utils.fixAccents(getConfig().getString("strings.permissionDenied")));
@@ -117,9 +115,9 @@ public class Main extends JavaPlugin implements Listener {
             getRelativeCoord(loc.getBlockZ()));
     }
 
-    private double getRelativeCoord(int i) {
-        double d = i;
-        d = d < 0 ? d - .5 : d + .5;
+    private double getRelativeCoord(double d) {
+        d           = d < 0 ? d - .5 : d + .5;
+
         return d;
     }
 
@@ -133,18 +131,19 @@ public class Main extends JavaPlugin implements Listener {
         // Generate location
         Location teleport           = new Location(world, x, 0, z);
 
-        // Get the hightest location block
+        // Get the highest location block
         Block highestBlock          = world.getHighestBlockAt(teleport);
         Location highestBlockLoc    = highestBlock.getLocation();
         String highestBlockType     = highestBlock.getRelative(BlockFace.DOWN).getType().name();
 
-        // Check for hightest block type
-        if (prohibitedBlocks.contains(highestBlockType))
+        // Check if the highest block is an invalid block (it's prohibited or it's AIR)
+        if (highestBlock.getType().equals(Material.AIR) || prohibitedBlocks.contains(highestBlockType)) {
             return findSafeTeleportLocation(world);
+        }
 
         // Check for surround blocks
-        for(int ly = 0; ly < 3; ly++)
-            for(int lx = 0; lx < 2; lx++)
+        for(int ly = 0; ly < 3; ly++) {
+            for(int lx = 0; lx < 2; lx++) {
                 for(int lz = 0; lz < 2; lz++) {
                     // Get positive and negative blocks
                     Block bp                = world.getBlockAt(highestBlockLoc.add(lx * -1, ly, lz * -1));
@@ -152,9 +151,12 @@ public class Main extends JavaPlugin implements Listener {
 
                     // Check if the surrounded blocks isn't air
                     // then start to check again
-                    if (bp.getType() != Material.AIR || bn.getType() != Material.AIR)
+                    if (bp.getType() != Material.AIR || bn.getType() != Material.AIR) {
                         return findSafeTeleportLocation(world);
+                    }
                 }
+            }
+        }
 
         // Get the center of the hightest block location
         teleport                = getCenter(highestBlock.getLocation());
@@ -163,13 +165,19 @@ public class Main extends JavaPlugin implements Listener {
     }
 
     public void createLocationFinder(final Player p, final String world) {
-        Location teleport   = findSafeTeleportLocation(Bukkit.getWorld(world));
+        // Run the search in a new thread
+        getServer().getScheduler().scheduleSyncDelayedTask(this, new Runnable() {
+            @Override
+            public void run() {
+                Location teleport   = findSafeTeleportLocation(Bukkit.getWorld(world));
+                
+                // Finally teleport player
+                p.teleport(teleport);
 
-        // Finally teleport player
-        p.teleport(teleport);
-
-        // and send "success" message
-        p.sendMessage(Strings.prefix + Strings.success);
+                // and send "success" message
+                p.sendMessage(Strings.prefix + Strings.success);
+            }
+        }, 1L);
     }
 
     /* -------------------------------------------------------------------------------------------------------------------------- */
